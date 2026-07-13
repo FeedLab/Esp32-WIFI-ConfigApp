@@ -141,6 +141,15 @@ namespace WifiAP
             }
             else
             {
+                if (string.IsNullOrEmpty(request.RawUrl))
+                {
+                    // A malformed/aborted request (e.g. a client that disconnected before
+                    // sending a full request line) parses with a null RawUrl. Nothing to
+                    // serve - drop it quietly rather than throwing.
+                    Debug.WriteLine("[web] request had no RawUrl - dropping");
+                    return;
+                }
+
                 string path = request.RawUrl.Split('?')[0];
 
                 if (path == "/favicon.ico")
@@ -155,8 +164,8 @@ namespace WifiAP
                 else if (path == "/info")
                 {
                     // Read-only device information, callable from a PC on the same network.
-                    response.ContentType = "application/json";
-                    OutPutResponse(response, CreateInfoJson());
+                    response.ContentType = "text/html";
+                    OutPutResponse(response, CreateInfoPage());
                 }
                 else if (_apMode)
                 {
@@ -176,8 +185,8 @@ namespace WifiAP
                 else
                 {
                     // Station mode: no setup UI, expose the device info instead.
-                    response.ContentType = "application/json";
-                    OutPutResponse(response, CreateInfoJson());
+                    response.ContentType = "text/html";
+                    OutPutResponse(response, CreateInfoPage());
                 }
             }
 
@@ -293,9 +302,9 @@ namespace WifiAP
         }
 
         /// <summary>
-        /// Builds a small JSON document describing the device, served from <c>/info</c>.
+        /// Builds an HTML page describing the device, served from <c>/info</c>.
         /// </summary>
-        string CreateInfoJson()
+        string CreateInfoPage()
         {
             NetworkInterface ni = GetActiveInterface(_apMode);
             string ip = ni == null ? "" : ni.IPv4Address;
@@ -319,22 +328,55 @@ namespace WifiAP
 
             // GC.Run returns the free memory in bytes after collection.
             uint freeMemory = nanoFramework.Runtime.Native.GC.Run(false);
+            string firmwareVersion = SystemInfo.Version == null ? "" : SystemInfo.Version.ToString();
+            string modeLabel = _apMode ? "Access Point" : "Station";
+            string modeClass = _apMode ? "mode-ap" : "mode-sta";
 
-            StringBuilder sb = new StringBuilder();
-            sb.Append("{");
-            sb.Append("\"mode\":\"" + (_apMode ? "AccessPoint" : "Station") + "\",");
-            sb.Append("\"ipAddress\":" + JsonString(ip) + ",");
-            sb.Append("\"macAddress\":" + JsonString(mac) + ",");
-            sb.Append("\"ssid\":" + JsonString(ssid) + ",");
-            sb.Append("\"platform\":" + JsonString(SystemInfo.Platform) + ",");
-            sb.Append("\"target\":" + JsonString(SystemInfo.TargetName) + ",");
-            sb.Append("\"oem\":" + JsonString(SystemInfo.OEMString) + ",");
-            sb.Append("\"firmwareVersion\":" +
-                      JsonString(SystemInfo.Version == null ? "" : SystemInfo.Version.ToString()) + ",");
-            sb.Append("\"freeMemoryBytes\":" + freeMemory.ToString());
-            sb.Append("}");
+            string rows =
+                InfoRow("Mode", modeLabel) +
+                InfoRow("IP address", ip) +
+                InfoRow("MAC address", mac) +
+                InfoRow("SSID", ssid) +
+                InfoRow("Platform", SystemInfo.Platform) +
+                InfoRow("Target", SystemInfo.TargetName) +
+                InfoRow("OEM", SystemInfo.OEMString) +
+                InfoRow("Firmware version", firmwareVersion) +
+                InfoRow("Free memory", freeMemory.ToString() + " bytes");
 
-            return sb.ToString();
+            return "<!DOCTYPE html><html><head>" +
+                   "<meta charset='utf-8'>" +
+                   "<meta name='viewport' content='width=device-width, initial-scale=1'>" +
+                   "<link rel='icon' href='data:,'>" +
+                   "<title>Device Info</title>" +
+                   "<style>" +
+                   "body{font-family:sans-serif;font-size:16px;margin:0;padding:24px;background:#f2f2f2;}" +
+                   ".card{max-width:420px;margin:0 auto;background:#fff;padding:20px;border-radius:10px;" +
+                   "box-shadow:0 1px 4px rgba(0,0,0,.2);}" +
+                   "h2{margin-top:0;display:flex;align-items:center;gap:10px;}" +
+                   ".badge{font-size:13px;font-weight:normal;padding:3px 10px;border-radius:12px;color:#fff;}" +
+                   ".mode-ap{background:#c9820a;}" +
+                   ".mode-sta{background:#2a9d4a;}" +
+                   "table{width:100%;border-collapse:collapse;}" +
+                   "td{padding:8px 0;border-bottom:1px solid #eee;font-size:15px;}" +
+                   "td.k{color:#777;width:42%;}" +
+                   "td.v{font-weight:bold;word-break:break-all;}" +
+                   "tr:last-child td{border-bottom:0;}" +
+                   "button{width:100%;margin-top:20px;padding:12px;font-size:16px;border:0;" +
+                   "border-radius:6px;background:#0a7aa7;color:#fff;}" +
+                   "</style></head><body><div class='card'>" +
+                   "<h2>Device Info <span class='badge " + modeClass + "'>" + modeLabel + "</span></h2>" +
+                   "<table>" + rows + "</table>" +
+                   "<button onclick='location.reload()'>Refresh</button>" +
+                   "</div></body></html>";
+        }
+
+        /// <summary>
+        /// Builds one label/value row for the device info table.
+        /// </summary>
+        static string InfoRow(string label, string value)
+        {
+            string safeValue = string.IsNullOrEmpty(value) ? "-" : HtmlEncode(value);
+            return "<tr><td class='k'>" + HtmlEncode(label) + "</td><td class='v'>" + safeValue + "</td></tr>";
         }
 
         /// <summary>
@@ -355,52 +397,6 @@ namespace WifiAP
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Encodes a string as a quoted, escaped JSON string literal.
-        /// </summary>
-        static string JsonString(string value)
-        {
-            if (value == null)
-            {
-                return "\"\"";
-            }
-
-            StringBuilder sb = new StringBuilder(value.Length + 2);
-            sb.Append('"');
-            for (int i = 0; i < value.Length; i++)
-            {
-                char c = value[i];
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < ' ')
-                        {
-                            sb.Append("\\u00");
-                            sb.Append(HexDigit((c >> 4) & 0xF));
-                            sb.Append(HexDigit(c & 0xF));
-                        }
-                        else
-                        {
-                            sb.Append(c);
-                        }
-                        break;
-                }
-            }
-            sb.Append('"');
-
-            return sb.ToString();
-        }
-
-        static char HexDigit(int value)
-        {
-            return (char)(value < 10 ? '0' + value : 'a' + (value - 10));
         }
 
         /// <summary>
