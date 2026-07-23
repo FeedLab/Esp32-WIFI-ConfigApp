@@ -124,10 +124,6 @@ namespace WifiAP
 
                 Debug.WriteLine($"Wireless parameters SSID:{ssid} PASSWORD:{password}");
 
-                // Compact the heap now that the scan cache has been dropped, to maximize free
-                // contiguous memory before the allocations needed to build and send the response.
-                nanoFramework.Runtime.Native.GC.Run(true);
-
                 // Send the confirmation page now, while the Soft AP link to this client is
                 // still up. Joining the new network (below, after the response is sent) takes
                 // over the device's single WiFi radio and drops the Soft AP almost immediately -
@@ -206,10 +202,21 @@ namespace WifiAP
                 bool connected = Wireless80211.Configure(ssid, password);
                 Debug.WriteLine($"[web] station connect result: {connected}");
 
-                WirelessAP.Disable();
-                Debug.WriteLine("[web] rebooting into normal mode");
-                Thread.Sleep(200);
-                Power.RebootDevice();
+                if (connected)
+                {
+                    // Station join succeeded - reboot into normal mode so the device
+                    // comes up cleanly on the new network.
+                    WirelessAP.Disable();
+                    Debug.WriteLine("[web] rebooting into normal mode");
+                    Thread.Sleep(200);
+                    Power.RebootDevice();
+                }
+                else
+                {
+                    // Station join failed (e.g. wrong password) - keep the Soft AP running
+                    // instead of rebooting into a station boot that's doomed to fail too.
+                    Debug.WriteLine("[web] station connect failed - staying in Soft AP setup mode");
+                }
             }
         }
 
@@ -455,6 +462,12 @@ namespace WifiAP
 
         static void OutPutResponse(HttpListenerResponse response, string responseString)
         {
+            // Compact the heap right before this allocation - by far the largest single
+            // buffer in the request/response cycle - so fragmentation left over from the many
+            // small strings built while rendering the page doesn't starve it of a contiguous
+            // block. Without this, repeated GET requests (e.g. /info) fragment the heap until
+            // UTF8Encoding.GetBytes throws OutOfMemoryException even with bytes nominally free.
+            nanoFramework.Runtime.Native.GC.Run(true);
             OutPutByteResponse(response, System.Text.Encoding.UTF8.GetBytes(responseString));
         }
 

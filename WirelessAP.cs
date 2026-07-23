@@ -35,12 +35,17 @@ namespace WifiAP
         /// <summary>
         /// Sets the configuration for the wireless access point.
         /// </summary>
-        public static void SetWifiAp()
+        /// <param name="forceReconfigure">
+        /// If <see langword="true"/>, writes and saves the configuration even if it already
+        /// matches the wanted settings. Use this when the caller wants a guaranteed reboot
+        /// into a fresh Soft AP (e.g. the user explicitly requested setup mode via the button).
+        /// </param>
+        public static void SetWifiAp(bool forceReconfigure = false)
         {
             Debug.WriteLine("[ap] SetWifiAp starting");
             Wireless80211.Disable();
 
-            bool configWritten = ConfigureAp();
+            bool configWritten = ConfigureAp(forceReconfigure);
             Debug.WriteLine($"[ap] ConfigureAp wrote new config: {configWritten}");
             if (configWritten)
             {
@@ -91,7 +96,7 @@ namespace WifiAP
         /// <see langword="true"/> if a new configuration was written and the device must
         /// reboot to activate it; <see langword="false"/> if it was already configured.
         /// </returns>
-        private static bool ConfigureAp()
+        private static bool ConfigureAp(bool forceReconfigure = false)
         {
             NetworkInterface ni = GetInterface();
             WirelessAPConfiguration wapconf = GetConfiguration();
@@ -103,12 +108,17 @@ namespace WifiAP
                 throw new InvalidOperationException("No WirelessAP network interface was found.");
             }
 
-            Debug.WriteLine($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}");
+            Debug.WriteLine($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}, current SSID={wapconf.Ssid}, wanted SSID={SoftAppSsid}, forceReconfigure={forceReconfigure}");
 
-            // If already enabled with the expected IP, no configuration change is needed.
-            if (wapconf.Options == (WirelessAPConfiguration.ConfigurationOptions.Enable |
+            // If already enabled with the expected IP and SSID, no configuration change is
+            // needed - unless the caller explicitly wants a fresh configuration written
+            // regardless. SSID must be checked too, otherwise a stale/default SSID saved from
+            // an earlier boot would keep matching on Options+IP alone and never get corrected.
+            if (!forceReconfigure &&
+                wapconf.Options == (WirelessAPConfiguration.ConfigurationOptions.Enable |
                                     WirelessAPConfiguration.ConfigurationOptions.AutoStart) &&
-                ni.IPv4Address == SoftAppIp)
+                ni.IPv4Address == SoftAppIp &&
+                wapconf.Ssid == SoftAppSsid)
             {
                 Debug.WriteLine("[ap] ConfigureAp: already configured, no changes needed");
                 return false;

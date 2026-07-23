@@ -25,7 +25,7 @@ namespace WifiAP
         private static int connectedCount = 0;
 
         // GPIO pin used to put device into AP set-up mode
-        private const int SetupPin = 5;
+        private const int SetupPin = 2;
 
         // Guard delay held at the very start of every boot. Provisioning triggers one or
         // more reboots, and without an idle window here the device reboots faster than the
@@ -33,11 +33,15 @@ namespace WifiAP
         // "--masserase" to recover. Keeping the CLR idle briefly guarantees a deploy window
         // on every boot, even during a reboot loop.
         private const int DeployGuardDelayMs = 5000;
+        private static DateTime lastPress = DateTime.MinValue;
+        private const int debounceMs = 50;
 
         public static void Main()
         {
             Debug.WriteLine("Welcome to WiFI Soft AP world!");
             Debug.WriteLine($"[boot] free memory: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+
+            StatusLed.Initialize();
 
             // Give the deployment tool a chance to connect before any reboot/network logic runs.
             Thread.Sleep(DeployGuardDelayMs);
@@ -45,31 +49,54 @@ namespace WifiAP
             var gpioController = new GpioController();
             GpioPin setupButton = gpioController.OpenPin(SetupPin, PinMode.InputPullUp);
 
-            PinValue buttonState = setupButton.Read();
-            Debug.WriteLine($"[boot] setup button pin state: {buttonState}");
+            setupButton.ValueChanged += (sender, args) =>
+            {
+                var now = DateTime.UtcNow;
+                if ((now - lastPress).TotalMilliseconds < debounceMs)
+                {
+                    // Ignore bounce
+                    return;
+                }
 
-            // If Wireless station is not enabled then start Soft AP to allow Wireless configuration
-            // or Button pressed. The pin is pulled up, so it reads Low only while the button is
-            // physically held down/grounded; High is the idle (unpressed) state.
-            if (buttonState == PinValue.Low)
-            {
-                Debug.WriteLine("[boot] setup button held - forcing Soft AP setup mode");
-                WirelessAP.SetWifiAp();
-                wifiApMode = true;
-            }
-            else
-            {
-                Debug.WriteLine("[boot] setup button not held - attempting station connect (or Soft AP fallback)");
-                wifiApMode = Wireless80211.ConnectOrSetAp();
-            }
+                if (args.ChangeType == PinEventTypes.Falling)
+                {
+                    Console.WriteLine("Button pressed!");
+                    Debug.WriteLine("[boot] setup button held - forcing Soft AP setup mode");
+                    WirelessAP.SetWifiAp(forceReconfigure: true);
+                    wifiApMode = true;
+                }
+                else if (args.ChangeType == PinEventTypes.Rising)
+                {
+                    Console.WriteLine("Button released!");
+                }
+            };
+
+            Debug.WriteLine("[boot] Attempting station connect (or Soft AP fallback)");
+            wifiApMode = Wireless80211.ConnectOrSetAp();
 
             Debug.WriteLine($"[boot] resulting mode: {(wifiApMode ? "AccessPoint" : "Station")}");
             Console.WriteLine($"Connected with wifi credentials. IP Address: {(wifiApMode ? WirelessAP.GetIpAddress() : Wireless80211.GetCurrentIPAddress())}");
 
-            // Start the web server in both modes: the setup form in Soft AP mode, and the
-            // read-only /info endpoint once connected to the network as a station.
-            Debug.WriteLine("[boot] starting web server");
-            server.Start(wifiApMode);
+            if (wifiApMode)
+            {
+                StatusLed.ShowWifiMode(true);
+
+                // Don't start the web server (and its background WiFi scan) yet. The scan
+                // uses the station radio, and running it while the Soft AP is still trying to
+                // broadcast/accept its first association can knock out the AP's beacon on some
+                // ESP32 targets before a client ever sees it. Wait for a station to actually
+                // connect first - see NetworkChange_NetworkAPStationChanged below.
+                Debug.WriteLine("[boot] AP mode - deferring web server/scan until a station connects");
+                NetworkChange.NetworkAPStationChanged += NetworkChange_NetworkAPStationChanged;
+            }
+            else
+            {
+                StatusLed.ShowWifiMode(false);
+
+                // Already a connected station - safe to start the read-only /info endpoint now.
+                Debug.WriteLine("[boot] starting web server");
+                server.Start(false);
+            }
             Debug.WriteLine($"[boot] free memory after start-up: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
             // Just wait for now
@@ -101,6 +128,11 @@ namespace WifiAP
                 // no connected network. Start web server when first station connects
                 if (connectedCount == 1)
                 {
+                    // Stop the LED blink before the scan/web server startup below - both are
+                    // memory-heavy, and leaving the blink thread's periodic RMT allocation
+                    // running concurrently has caused OutOfMemoryException on this device.
+                    StatusLed.StopApBlinking();
+
                     // Wait for Station to be fully connected before starting web server
                     // other you will get a Network error
                     Debug.WriteLine("[ap-event] first station connected - starting web server after settle delay");
