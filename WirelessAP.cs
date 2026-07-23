@@ -45,6 +45,14 @@ namespace WifiAP
         public static void SetWifiAp(bool forceReconfigure = false)
         {
             Debug.WriteLine("[ap] SetWifiAp starting");
+
+            // Scan now, before the AP's beacon comes up. Scanning uses the station radio, and
+            // doing it after the AP is already broadcasting/accepting its first association
+            // can knock the beacon out on this hardware before a client ever sees it - doing it
+            // here means the scan and the beacon never coexist, and the setup page's network
+            // list is already cached and ready by the time any client could possibly connect.
+            WebServer.SetAvailableNetworks(Wireless80211.Scan());
+
             Wireless80211.Disable();
 
             bool configWritten = ConfigureAp(forceReconfigure);
@@ -59,7 +67,12 @@ namespace WifiAP
             Debug.WriteLine($"[ap] starting DHCP server on {SoftAppIp}");
             var dhcpserver = new DhcpServer
             {
-                CaptivePortalUrl = $"http://{SoftAppIp}"
+                CaptivePortalUrl = $"http://{SoftAppIp}",
+                // Without these, clients get an IP but no DNS server/gateway - meaning a
+                // phone has nowhere to even send a captive-portal DNS probe, so it never
+                // reaches the DnsServer trap below at all.
+                DnsServer = IPAddress.Parse(SoftAppIp),
+                Gateway = IPAddress.Parse(SoftAppIp)
             };
             var dhcpInitResult = dhcpserver.Start(IPAddress.Parse(SoftAppIp), new IPAddress(new byte[] { 255, 255, 255, 0 }));
             if (!dhcpInitResult)
@@ -69,6 +82,9 @@ namespace WifiAP
                 Debug.WriteLine("[ap] DHCP server failed to start - rebooting");
                 Power.RebootDevice();
             }
+
+            Debug.WriteLine($"[ap] starting DNS captive-portal trap on {SoftAppIp}");
+            DnsServer.Start(SoftAppIp);
 
             Console.WriteLine($@"Running Soft AP, waiting for client to connect");
             Console.WriteLine($@"Soft AP IP address :{GetIpAddress()}");

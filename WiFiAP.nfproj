@@ -29,6 +29,7 @@
     <Compile Include="WebServer.cs" />
     <Compile Include="Wireless80211.cs" />
     <Compile Include="StatusLed.cs" />
+    <Compile Include="DnsServer.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="info.md" />
@@ -45,7 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Iot.Device.DhcpServer">
-      <HintPath>packages\nanoFramework.Iot.Device.DhcpServer.1.2.835\lib\Iot.Device.DhcpServer.dll</HintPath>
+      <HintPath>packages\nanoFramework.Iot.Device.DhcpServer.1.2.973\lib\Iot.Device.DhcpServer.dll</HintPath>
     </Reference>
     <Reference Include="Iot.Device.Ws28xx.Esp32">
       <HintPath>packages\nanoFramework.Iot.Device.Ws28xx.Esp32.1.2.864\lib\Iot.Device.Ws28xx.Esp32.dll</HintPath>

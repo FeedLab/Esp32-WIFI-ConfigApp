@@ -13,7 +13,7 @@ using nanoFramework.Networking;
 
 namespace WifiAP
 {
-    class Wireless80211
+    public class Wireless80211
     {
         // Signalled when an asynchronous scan completes.
         private static ManualResetEvent _scanCompleted;

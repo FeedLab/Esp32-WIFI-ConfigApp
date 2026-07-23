@@ -100,12 +100,12 @@ namespace WifiAP
             {
                 StatusLed.ShowWifiMode(true);
 
-                // Don't start the web server (and its background WiFi scan) yet. The scan
-                // uses the station radio, and running it while the Soft AP is still trying to
-                // broadcast/accept its first association can knock out the AP's beacon on some
-                // ESP32 targets before a client ever sees it. Wait for a station to actually
-                // connect first - see NetworkChange_NetworkAPStationChanged below.
-                Debug.WriteLine("[boot] AP mode - deferring web server/scan until a station connects");
+                // Don't start the web server yet - wait for a station to actually connect
+                // first (see NetworkChange_NetworkAPStationChanged below). The network scan
+                // that used to run as part of this start-up has been moved earlier, into
+                // WirelessAP.SetWifiAp, before the AP's beacon comes up at all - see the
+                // comment there for why running it concurrently with the beacon was risky.
+                Debug.WriteLine("[boot] AP mode - deferring web server until a station connects");
                 NetworkChange.NetworkAPStationChanged += NetworkChange_NetworkAPStationChanged;
             }
             else

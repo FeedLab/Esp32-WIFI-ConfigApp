@@ -22,8 +22,19 @@ namespace WifiAP
         // True when running as the Soft AP setup portal; false when connected as a station.
         private bool _apMode;
 
-        // Networks discovered by the WiFi scan performed at server start-up.
+        // Networks discovered by the WiFi scan performed before the Soft AP comes up (see
+        // WirelessAP.SetWifiAp) - populated via SetAvailableNetworks, not scanned here.
         private static Wireless80211.ScannedNetwork[] _availableNetworks;
+
+        /// <summary>
+        /// Supplies the network list to offer on the setup page. Called once, before the Soft
+        /// AP's beacon comes up, so the list is already ready by the time any client connects -
+        /// see the comment on WirelessAP.SetWifiAp for why the scan can't happen after that.
+        /// </summary>
+        public static void SetAvailableNetworks(Wireless80211.ScannedNetwork[] networks)
+        {
+            _availableNetworks = networks;
+        }
 
         /// <summary>
         /// Starts the web server.
@@ -55,21 +66,6 @@ namespace WifiAP
         {
             listener.Start();
             Debug.WriteLine($"[web] listener started, apMode={_apMode}, free memory={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
-
-            if (_apMode)
-            {
-                // Scan for nearby networks once, so the setup page can offer a list. Run it
-                // on its own thread so the up-to-8-second scan doesn't delay the listener from
-                // accepting connections - the AP is already broadcasting and handing out DHCP
-                // leases by this point, so a client could otherwise reach the AP but find the
-                // web server unreachable until the scan finished. Only relevant in AP setup
-                // mode - scanning while connected as a station would disrupt that connection.
-                new Thread(() =>
-                {
-                    _availableNetworks = Wireless80211.Scan();
-                    Debug.WriteLine($"[web] background scan populated {_availableNetworks.Length} network(s)");
-                }).Start();
-            }
 
             while (listener.IsListening)
             {
