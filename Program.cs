@@ -71,8 +71,27 @@ namespace WifiAP
                 }
             };
 
-            Debug.WriteLine("[boot] Attempting station connect (or Soft AP fallback)");
-            wifiApMode = Wireless80211.ConnectOrSetAp();
+            // ValueChanged only fires on a transition. If the button is already held down from
+            // before boot, the pin reads Low the moment it's opened and no Falling edge ever
+            // occurs, so the check above alone would miss it - check the level directly too.
+            if (setupButton.Read() == PinValue.Low)
+            {
+                Console.WriteLine("Button held at boot!");
+                Debug.WriteLine("[boot] setup button already held at boot - entering Soft AP setup mode");
+
+                // Don't force a reconfigure/reboot here: we just booted, so a fresh AP is not
+                // needed. If the AP is already configured with the wanted settings, this brings
+                // it up without another reboot - otherwise, holding the button through the first
+                // config-writing reboot would keep re-triggering this same branch every time,
+                // forcing another reboot, forever, for as long as the button stays held.
+                WirelessAP.SetWifiAp();
+                wifiApMode = true;
+            }
+            else
+            {
+                Debug.WriteLine("[boot] Attempting station connect (or Soft AP fallback)");
+                wifiApMode = Wireless80211.ConnectOrSetAp();
+            }
 
             Debug.WriteLine($"[boot] resulting mode: {(wifiApMode ? "AccessPoint" : "Station")}");
             Console.WriteLine($"Connected with wifi credentials. IP Address: {(wifiApMode ? WirelessAP.GetIpAddress() : Wireless80211.GetCurrentIPAddress())}");

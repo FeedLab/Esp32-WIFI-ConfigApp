@@ -28,9 +28,11 @@ namespace WifiAP
         private static string SoftAppIp { get; set; } = SoftApIpAddress;
 
         /// <summary>
-        /// Gets or sets the SSID of the Soft AP.
+        /// The default SSID used for the Soft AP the first time it is ever configured. Once a
+        /// name has been persisted via <see cref="SetApName"/>, that value is used instead of
+        /// falling back to this default.
         /// </summary>
-        private static string SoftAppSsid { get; set; } = "Sensor-Setup";
+        private const string DefaultApSsid = "Sensor-Setup";
 
         /// <summary>
         /// Sets the configuration for the wireless access point.
@@ -108,7 +110,11 @@ namespace WifiAP
                 throw new InvalidOperationException("No WirelessAP network interface was found.");
             }
 
-            Debug.WriteLine($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}, current SSID={wapconf.Ssid}, wanted SSID={SoftAppSsid}, forceReconfigure={forceReconfigure}");
+            // Keep whatever name the user has already chosen (see SetApName); only fall back to
+            // the default the very first time, when nothing has been configured yet.
+            string wantedSsid = string.IsNullOrEmpty(wapconf.Ssid) ? DefaultApSsid : wapconf.Ssid;
+
+            Debug.WriteLine($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}, current SSID={wapconf.Ssid}, wanted SSID={wantedSsid}, forceReconfigure={forceReconfigure}");
 
             // If already enabled with the expected IP and SSID, no configuration change is
             // needed - unless the caller explicitly wants a fresh configuration written
@@ -118,7 +124,7 @@ namespace WifiAP
                 wapconf.Options == (WirelessAPConfiguration.ConfigurationOptions.Enable |
                                     WirelessAPConfiguration.ConfigurationOptions.AutoStart) &&
                 ni.IPv4Address == SoftAppIp &&
-                wapconf.Ssid == SoftAppSsid)
+                wapconf.Ssid == wantedSsid)
             {
                 Debug.WriteLine("[ap] ConfigureAp: already configured, no changes needed");
                 return false;
@@ -136,8 +142,8 @@ namespace WifiAP
             wapconf.Options = WirelessAPConfiguration.ConfigurationOptions.AutoStart |
                             WirelessAPConfiguration.ConfigurationOptions.Enable;
 
-            // Set the SSID for Access Point. If not set will use default  "nano_xxxxxx"
-            wapconf.Ssid = SoftAppSsid;
+            // Set the SSID for Access Point.
+            wapconf.Ssid = wantedSsid;
 
             // Maximum number of simultaneous connections, reserves memory for connections
             wapconf.MaxConnections = 1;
@@ -203,6 +209,49 @@ namespace WifiAP
             }
 
             return ni.IPv4Address;
+        }
+
+        /// <summary>
+        /// Gets the name currently configured for the Soft AP, falling back to the default if
+        /// none has been set yet.
+        /// </summary>
+        public static string GetApName()
+        {
+            WirelessAPConfiguration wapconf = GetConfiguration();
+            if (wapconf == null || string.IsNullOrEmpty(wapconf.Ssid))
+            {
+                return DefaultApSsid;
+            }
+
+            return wapconf.Ssid;
+        }
+
+        /// <summary>
+        /// Persists a new name for the Soft AP. Takes effect the next time Soft AP mode is
+        /// (re)configured - it does not rename an already-running AP.
+        /// </summary>
+        public static void SetApName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            WirelessAPConfiguration wapconf = GetConfiguration();
+            if (wapconf == null)
+            {
+                return;
+            }
+
+            // WiFi SSIDs are capped at 32 bytes.
+            if (name.Length > 32)
+            {
+                name = name.Substring(0, 32);
+            }
+
+            wapconf.Ssid = name;
+            wapconf.SaveConfiguration();
+            Debug.WriteLine($"[ap] SetApName: persisted new Soft AP name '{name}'");
         }
 
     }

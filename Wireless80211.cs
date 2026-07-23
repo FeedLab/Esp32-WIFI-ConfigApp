@@ -209,6 +209,14 @@ namespace WifiAP
         {
             Wireless80211Configuration wconf = GetConfiguration();
             wconf.Options = Wireless80211Configuration.ConfigurationOptions.None | Wireless80211Configuration.ConfigurationOptions.SmartConfig;
+
+            // IsEnabled() (used by ConnectOrSetAp() to decide whether to even attempt a station
+            // reconnect) checks for a saved SSID, not the Options flags above - clearing only
+            // Options left the credentials in place, so the very next boot's ConnectOrSetAp()
+            // saw IsEnabled()==true and reconnected to the old network anyway, undoing the
+            // switch to Soft AP mode.
+            wconf.Ssid = "";
+            wconf.Password = "";
             wconf.SaveConfiguration();
         }
 

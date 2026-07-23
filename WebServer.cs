@@ -122,7 +122,16 @@ namespace WifiAP
 
                 ssid = string.IsNullOrEmpty(manual) ? selected : manual;
 
-                Debug.WriteLine($"Wireless parameters SSID:{ssid} PASSWORD:{password}");
+                // Persist the Soft AP name now, regardless of whether the station join below
+                // succeeds - it only takes effect the next time Soft AP mode is (re)entered, so
+                // there is no live-AP-rename risk here.
+                string apName = UrlDecode((string)pars["apName"]);
+                if (!string.IsNullOrEmpty(apName))
+                {
+                    WirelessAP.SetApName(apName);
+                }
+
+                Debug.WriteLine($"Wireless parameters SSID:{ssid} PASSWORD:{password} APNAME:{apName}");
 
                 // Send the confirmation page now, while the Soft AP link to this client is
                 // still up. Joining the new network (below, after the response is sent) takes
@@ -260,6 +269,8 @@ namespace WifiAP
                    "<input name='ssidManual' placeholder='optional'>" +
                    "<label>Password</label>" +
                    "<input name='password' type='password'>" +
+                   "<label>Access Point Name</label>" +
+                   "<input name='apName' value='" + HtmlEncode(WirelessAP.GetApName()) + "' maxlength='32'>" +
                    "<button type='submit'>Connect</button>" +
                    "</form></div></body></html>";
         }
