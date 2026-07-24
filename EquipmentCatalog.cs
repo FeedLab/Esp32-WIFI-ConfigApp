@@ -13,7 +13,11 @@ namespace WifiAP
   {
     ""DeviceName"": ""MH‑Z19B"",
     ""AccessType"": ""UART""
-  }
+  },
+  {
+    ""DeviceName"": ""SHT30"",
+    ""AccessType"": ""I2C""
+  },
 ]";
 
         public const string DeviceConfigurationsJson = @"[
@@ -32,6 +36,23 @@ namespace WifiAP
         ""Name"": ""Co2"",
         ""Unit"": ""ppm"",
         ""EndPoint"": ""Readings/Co2""
+      }
+    ]
+  },
+  {
+    ""DeviceNames"": [""SHT30"", ""SHT31""],
+    ""ClassName"": ""SHT3x"",
+    ""AccessType"": ""I2C"",
+    ""Sensors"": [
+      {
+        ""Name"": ""Temperature"",
+        ""Unit"": ""°C"",
+        ""EndPoint"": ""Readings/Temperature""
+      },
+      {
+        ""Name"": ""Humidity"",
+        ""Unit"": ""%"",
+        ""EndPoint"": ""Readings/Humidity""
       }
     ]
   },

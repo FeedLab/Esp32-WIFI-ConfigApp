@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using nanoFramework.Hardware.Esp32;
 using nanoFramework.Json;
 
 namespace WifiAP
@@ -130,8 +131,15 @@ namespace WifiAP
 
             try
             {
-                string configJson = JsonConvert.SerializeObject(matched);
-                device.Configure(configJson);
+                Configuration.SetPinFunction(4, DeviceFunction.COM2_RX);
+                Configuration.SetPinFunction(5, DeviceFunction.COM2_TX);
+                
+                Configuration.SetPinFunction(6, DeviceFunction.I2C1_DATA);
+                Configuration.SetPinFunction(7, DeviceFunction.I2C1_CLOCK);
+                
+                // I2cScanner.ScanBus(1);
+                
+                device.Configure(matched);
                 Devices.Add(device);
                 RegisterEndpoints(device, matched);
                 Log.Debug($"[equip] Configured '{entry.DeviceName}' as {matched.ClassName}");
@@ -157,7 +165,7 @@ namespace WifiAP
                     continue;
                 }
 
-                string path = "/" + sensor.EndPoint;
+                string path = "/" + sensor.EndPoint.ToLower();
                 if (!EndpointsByPath.Contains(path))
                 {
                     EndpointsByPath.Add(path, new SensorEndpoint { Device = device, SensorName = sensor.Name });
@@ -198,6 +206,8 @@ namespace WifiAP
                     return new WifiAP.Devices.Sensors.Bme280();
                 case "Hc8":
                     return new WifiAP.Devices.Sensors.Hc8();
+                case "SHT3x":
+                    return new WifiAP.Devices.Sensors.SHT3x();
                 case "SHT4x":
                     return new WifiAP.Devices.Sensors.SHT4x();
                 default:

@@ -9,13 +9,18 @@ namespace WifiAP.Devices.Sensors
     public class Hc8 : IDevice
     {
         private static readonly byte[] GetPpmCmd = { 0x64, 0x69, 0x03, 0x5E, 0x4E };
+        private SerialPort uart;
+        private DeviceConfigurationEntry deviceInformation;
 
-        private System.IO.Ports.SerialPort uart;
+        public string Name { get; } = "Hc8";
+        public string DisplayName { get; } = "HC-8";
 
-        public void Configure(string json)
+        public void Configure(DeviceConfigurationEntry deviceData)
         {
-            Configuration.SetPinFunction(4, DeviceFunction.COM2_RX);
-            Configuration.SetPinFunction(5, DeviceFunction.COM2_TX);
+            deviceInformation = deviceData;
+            
+            
+
 
             uart = new SerialPort("COM2", 9600, Parity.None, 8, StopBits.One);
             uart.Open();
@@ -105,7 +110,6 @@ namespace WifiAP.Devices.Sensors
             return crc;
         }
 
-        public string Name { get; }
-        public string DisplayName { get; }
+
     }
 }

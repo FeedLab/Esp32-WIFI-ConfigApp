@@ -5,7 +5,7 @@
         string Name { get; }
         string DisplayName { get; }
 
-        void Configure(string json);
+        void Configure(DeviceConfigurationEntry deviceData);
 
         double ReadSensor(string sensorName);
     }

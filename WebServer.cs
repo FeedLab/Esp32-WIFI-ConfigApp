@@ -113,7 +113,7 @@ namespace WifiAP
                 return;
             }
 
-            string path = request.RawUrl.Split('?')[0];
+            string path = request.RawUrl.Split('?')[0].ToLower();
 
             if (request.HttpMethod == "POST" && path == "/save")
             {

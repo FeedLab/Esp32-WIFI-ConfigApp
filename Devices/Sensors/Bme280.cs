@@ -2,7 +2,7 @@
 {
     public class Bme280 : IDevice
     {
-        public void Configure(string json)
+        public void Configure(DeviceConfigurationEntry deviceData)
         {
         }
 
