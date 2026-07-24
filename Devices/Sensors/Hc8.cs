@@ -2,7 +2,6 @@ using nanoFramework.Networking;
 using System;
 using System.IO.Ports;
 using System.Threading;
-using nanoFramework.Hardware.Esp32;
 
 namespace WifiAP.Devices.Sensors
 {
@@ -11,25 +10,56 @@ namespace WifiAP.Devices.Sensors
         private static readonly byte[] GetPpmCmd = { 0x64, 0x69, 0x03, 0x5E, 0x4E };
         private SerialPort uart;
         private DeviceConfigurationEntry deviceInformation;
+        private Thread pollThread;
+        private DateTime lastSensorPollTime = DateTime.MinValue;
+        private double co2;
+        private const int PollIntervalMs = 2000;
 
-        public string Name { get; } = "Hc8";
-        public string DisplayName { get; } = "HC-8";
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
 
         public void Configure(DeviceConfigurationEntry deviceData)
         {
             deviceInformation = deviceData;
             
-            
-
+            Name = deviceInformation.DeviceName;
+            DisplayName = deviceInformation.DeviceName;
 
             uart = new SerialPort("COM2", 9600, Parity.None, 8, StopBits.One);
             uart.Open();
 
-            Thread.Sleep(3000);
-            Log.Debug($"Bytes waiting after 3s passive listen: {uart.BytesToRead}");
+            pollThread = new Thread(() =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        ReadSensorInternal();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug($"{nameof(SHT3x)}: poll failed: {ex.Message}");
+                    }
+
+                    Thread.Sleep(PollIntervalMs);
+                }
+            });
+            pollThread.Start();
         }
 
-        public double ReadSensor(string sensorName)
+        public SensorReadingResponse ReadSensor(string sensorName)
+        {
+            if (sensorName == "Co2")
+            {
+                return new SensorReadingResponse { Value = co2, Timestamp = lastSensorPollTime };
+            }
+            else
+            {
+                throw new ArgumentException($"Unknown sensor name: {sensorName}");
+            }
+        }
+
+        private void ReadSensorInternal()
         {
             DrainRxBuffer(); // clear out any stray/late frame before asking
 
@@ -57,13 +87,13 @@ namespace WifiAP.Devices.Sensors
             if (totalRead < response.Length)
             {
                 Log.Debug($"{nameof(Hc8)}: incomplete response ({totalRead}/{response.Length} bytes)");
-                return double.NaN;
+                co2 = double.NaN;
             }
 
             if (response[0] != 0x64 || response[1] != 0x69)
             {
                 Log.Debug($"{nameof(Hc8)}: invalid preamble");
-                return double.NaN;
+                co2 = double.NaN;
             }
 
             ushort crc = Crc16Modbus(response, 12);
@@ -72,14 +102,13 @@ namespace WifiAP.Devices.Sensors
             if (crc != expectedCrc)
             {
                 Log.Debug($"{nameof(Hc8)}: checksum mismatch");
-                return double.NaN;
+                co2 = double.NaN;
             }
 
             int ppm = (response[5] << 8) | response[4];
 
-            Log.Debug($"{nameof(Hc8)} Response: CO2={ppm}ppm");
-
-            return ppm;
+            co2 = ppm;
+            lastSensorPollTime = DateTime.UtcNow;
         }
 
         private void DrainRxBuffer()

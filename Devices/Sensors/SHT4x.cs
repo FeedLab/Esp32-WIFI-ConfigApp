@@ -6,12 +6,12 @@ namespace WifiAP.Devices.Sensors
         {
         }
 
-        public double ReadSensor(string sensorName)
+        public SensorReadingResponse ReadSensor(string sensorName)
         {
-            return 0;
+            return new SensorReadingResponse { Value = 0 };
         }
 
-        public string Name { get; }
-        public string DisplayName { get; }
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
     }
 }

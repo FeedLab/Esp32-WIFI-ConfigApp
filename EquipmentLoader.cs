@@ -41,6 +41,7 @@ namespace WifiAP
         public UartSettings UART { get; set; }
         public I2CSettings I2C { get; set; }
         public SensorDef[] Sensors { get; set; }
+        public string DeviceName { get; set; }
     }
 
     /// <summary>A sensor reading route, registered by EndPoint path for WebServer to serve.</summary>
@@ -186,6 +187,7 @@ namespace WifiAP
                 {
                     if (name == deviceName)
                     {
+                        candidate.DeviceName = deviceName;
                         return candidate;
                     }
                 }

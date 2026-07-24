@@ -1,4 +1,6 @@
-﻿namespace WifiAP.Devices.Sensors
+﻿using System;
+
+namespace WifiAP.Devices.Sensors
 {
     public class Bme280 : IDevice
     {
@@ -6,12 +8,12 @@
         {
         }
 
-        public double ReadSensor(string sensorName)
+        public SensorReadingResponse ReadSensor(string sensorName)
         {
-            return 0;
+            return new SensorReadingResponse { Value = 0, Timestamp = DateTime.UtcNow };
         }
 
-        public string Name { get; }
-        public string DisplayName { get; }
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
     }
 }

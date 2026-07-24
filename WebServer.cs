@@ -206,16 +206,10 @@ namespace WifiAP
                     // Only ever populated in station mode - EquipmentLoader.LoadAndConfigure is
                     // not called while in Soft AP setup mode - so this is a no-op lookup there.
                     var endpoint = (SensorEndpoint)EquipmentLoader.EndpointsByPath[path];
-                    double value = endpoint.Device.ReadSensor(endpoint.SensorName);
+                    var value = endpoint.Device.ReadSensor(endpoint.SensorName);
                     response.ContentType = "application/json";
 
-                    var reading = new SensorOutput
-                    {
-                        Value = value,
-                        Timestamp = DateTime.UtcNow.ToString()
-                    };
-
-                    string json = nanoFramework.Json.JsonSerializer.SerializeObject(reading);
+                    string json = JsonSerializer.SerializeObject(value);
 
                     OutPutResponse(response, json);
                 }

@@ -1,12 +1,20 @@
-﻿namespace WifiAP
+﻿using System;
+
+namespace WifiAP
 {
     public interface IDevice
     {
-        string Name { get; }
-        string DisplayName { get; }
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
 
         void Configure(DeviceConfigurationEntry deviceData);
 
-        double ReadSensor(string sensorName);
+        SensorReadingResponse ReadSensor(string sensorName);
+    }
+    
+    public class SensorReadingResponse
+    {
+        public double Value { get; set; }
+        public DateTime Timestamp { get; set; }
     }
 }

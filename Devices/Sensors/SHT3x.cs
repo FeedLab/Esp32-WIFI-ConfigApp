@@ -8,17 +8,24 @@ namespace WifiAP.Devices.Sensors
     {
         private const int PollIntervalMs = 2000;
 
-        private I2cDevice sht3x;
+        private I2cDevice sht3X;
         private double humidity;
         private double temperature;
-        private Thread _pollThread;
+        private DateTime lastSensorPollTime = DateTime.MinValue;
+        private Thread pollThread;
+        private DeviceConfigurationEntry deviceInformation;
 
         public void Configure(DeviceConfigurationEntry deviceData)
         {
+            deviceInformation = deviceData;
+            
+            Name = deviceInformation.DeviceName;
+            DisplayName = deviceInformation.DeviceName;
+            
             var settings = new I2cConnectionSettings(1, 0x44); // bus 1, address 0x44
-            sht3x = I2cDevice.Create(settings);
+            sht3X = I2cDevice.Create(settings);
 
-            _pollThread = new Thread(() =>
+            pollThread = new Thread(() =>
             {
                 while (true)
                 {
@@ -34,18 +41,18 @@ namespace WifiAP.Devices.Sensors
                     Thread.Sleep(PollIntervalMs);
                 }
             });
-            _pollThread.Start();
+            pollThread.Start();
         }
 
-        public double ReadSensor(string sensorName)
+        public SensorReadingResponse ReadSensor(string sensorName)
         {
-            if(sensorName == "Temperature")
+            if (sensorName == "Temperature")
             {
-                return temperature;
+                return new SensorReadingResponse { Value = temperature, Timestamp = lastSensorPollTime };
             }
             else if (sensorName == "Humidity")
             {
-                return humidity;
+                return new SensorReadingResponse { Value = humidity, Timestamp = lastSensorPollTime };
             }
             else
             {
@@ -53,24 +60,25 @@ namespace WifiAP.Devices.Sensors
             }
         }
 
-        public void ReadSensorInternal()
+        private void ReadSensorInternal()
         {
             byte[] cmd = new byte[] { 0x24, 0x00 };
-            sht3x.Write(cmd);
+            sht3X.Write(cmd);
 
-            Thread.Sleep(150); // Wait for measurement to complete
+            Thread.Sleep(150);
 
-            byte[] buffer = new byte[6];
-            sht3x.Read(buffer);
+            var buffer = new byte[6];
+            sht3X.Read(buffer);
 
             int rawTemp = (buffer[0] << 8) | buffer[1];
             int rawHum = (buffer[3] << 8) | buffer[4];
 
             temperature = -45 + 175 * (rawTemp / 65535.0);
             humidity = 100 * (rawHum / 65535.0);
+            lastSensorPollTime = DateTime.UtcNow;
         }
 
-        public string Name { get; }
-        public string DisplayName { get; }
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
     }
 }
