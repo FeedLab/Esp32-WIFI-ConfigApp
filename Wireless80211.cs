@@ -6,7 +6,6 @@
 using System;
 using System.Collections;
 using System.Device.Wifi;
-using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Threading;
 using nanoFramework.Networking;
@@ -56,7 +55,7 @@ namespace WifiAP
         /// </remarks>
         public static ScannedNetwork[] Scan()
         {
-            Debug.WriteLine("[scan] starting WiFi scan");
+            Log.Debug("[scan] starting WiFi scan");
             WifiAdapter adapter = WifiAdapter.FindAllAdapters()[0];
 
             _scanCompleted = new ManualResetEvent(false);
@@ -69,11 +68,11 @@ namespace WifiAP
                 // Wait for the scan-complete event, capped so the web server is never blocked
                 // indefinitely if the scan is not signalled.
                 bool signalled = _scanCompleted.WaitOne(8000, false);
-                Debug.WriteLine($"[scan] wait completed, signalled={signalled}");
+                Log.Debug($"[scan] wait completed, signalled={signalled}");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"WiFi scan failed: {ex.Message}");
+                Log.Debug($"WiFi scan failed: {ex.Message}");
                 adapter.AvailableNetworksChanged -= Adapter_AvailableNetworksChanged;
                 return new ScannedNetwork[0];
             }
@@ -83,11 +82,11 @@ namespace WifiAP
             WifiNetworkReport report = adapter.NetworkReport;
             if (report == null || report.AvailableNetworks == null)
             {
-                Debug.WriteLine("[scan] no network report available");
+                Log.Debug("[scan] no network report available");
                 return new ScannedNetwork[0];
             }
 
-            Debug.WriteLine($"[scan] raw networks reported: {report.AvailableNetworks.Length}");
+            Log.Debug($"[scan] raw networks reported: {report.AvailableNetworks.Length}");
 
             WifiAvailableNetwork[] networks = report.AvailableNetworks;
 
@@ -130,13 +129,37 @@ namespace WifiAP
                 result[i] = (ScannedNetwork)found[i];
             }
 
-            Debug.WriteLine($"[scan] finished, unique SSIDs found: {result.Length}");
+            Log.Debug($"[scan] finished, unique SSIDs found: {result.Length}");
             return result;
         }
 
         private static void Adapter_AvailableNetworksChanged(WifiAdapter sender, object e)
         {
             _scanCompleted.Set();
+        }
+
+        /// <summary>
+        /// Applies the user's saved device name (see <see cref="WirelessAP.GetDeviceName"/>) to
+        /// the WiFi adapter so it shows up in the router's client list. Must be called before
+        /// each connection attempt - it does not persist on the adapter across connects.
+        /// </summary>
+        private static void ApplyDeviceName()
+        {
+            string deviceName = WirelessAP.GetDeviceName();
+            if (string.IsNullOrEmpty(deviceName))
+            {
+                return;
+            }
+
+            try
+            {
+                WifiAdapter.FindAllAdapters()[0].SetDeviceName(deviceName);
+                Log.Debug($"[sta] ApplyDeviceName: set device name to '{deviceName}'");
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"[sta] ApplyDeviceName: SetDeviceName failed: {ex.Message}");
+            }
         }
         /// <summary>
         /// Checks if the wireless 802.11 interface is enabled.
@@ -170,35 +193,37 @@ namespace WifiAP
         public static bool ConnectOrSetAp()
         {
             bool enabled = IsEnabled();
-            Debug.WriteLine($"[sta] ConnectOrSetAp: station configured (IsEnabled)={enabled}");
+            Log.Debug($"[sta] ConnectOrSetAp: station configured (IsEnabled)={enabled}");
 
             if (enabled)
             {
-                Debug.WriteLine("Wireless client activated");
+                Log.Debug("Wireless client activated");
 
                 // Give the CLR a moment to finish booting before initialising the network
                 // stack, otherwise the connect can fail this early in start-up.
                 Thread.Sleep(NetworkStartupDelayMs);
 
-                Debug.WriteLine("[sta] attempting Reconnect (30s timeout)");
+                ApplyDeviceName();
+
+                Log.Debug("[sta] attempting Reconnect (30s timeout)");
                 bool reconnected = WifiNetworkHelper.Reconnect(true, token: new CancellationTokenSource(30_000).Token);
-                Debug.WriteLine($"[sta] Reconnect result: {reconnected}");
+                Log.Debug($"[sta] Reconnect result: {reconnected}");
 
                 if (!reconnected)
                 {
-                    Debug.WriteLine("[sta] Reconnect failed - falling back to Soft AP setup mode");
+                    Log.Debug("[sta] Reconnect failed - falling back to Soft AP setup mode");
                     WirelessAP.SetWifiAp();
                     return true;
                 }
             }
             else
             {
-                Debug.WriteLine("[sta] no station configuration saved - entering Soft AP setup mode");
+                Log.Debug("[sta] no station configuration saved - entering Soft AP setup mode");
                 WirelessAP.SetWifiAp();
                 return true;
             }
 
-            Debug.WriteLine($"[sta] connected as station, IP: {GetCurrentIPAddress()}");
+            Log.Debug($"[sta] connected as station, IP: {GetCurrentIPAddress()}");
             return false;
         }
 
@@ -228,16 +253,18 @@ namespace WifiAP
         /// <returns></returns>
         public static bool Configure(string ssid, string password)
         {
-            Debug.WriteLine($"[sta] Configure: ssid={ssid}, free memory before={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug($"[sta] Configure: ssid={ssid}, free memory before={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
             // Make sure we are disconnected before we start connecting otherwise
             // ConnectDhcp will just return success instead of reconnecting.
             WifiAdapter wa = WifiAdapter.FindAllAdapters()[0];
             wa.Disconnect();
-            Debug.WriteLine("[sta] Configure: disconnected existing STA adapter");
+            Log.Debug("[sta] Configure: disconnected existing STA adapter");
+
+            ApplyDeviceName();
 
             CancellationTokenSource cs = new(30_000);
-            Console.WriteLine("ConnectDHCP");
+            Log.Info("ConnectDHCP");
             WifiNetworkHelper.Disconnect();
 
             // Reconfigure properly the normal wifi
@@ -246,26 +273,26 @@ namespace WifiAP
             wconf.Ssid = ssid;
             wconf.Password = password;
             wconf.SaveConfiguration();
-            Debug.WriteLine("[sta] Configure: station configuration saved");
+            Log.Debug("[sta] Configure: station configuration saved");
 
             WifiNetworkHelper.Disconnect();
             bool success;
 
-            Debug.WriteLine("[sta] Configure: calling ConnectDhcp (30s timeout)");
+            Log.Debug("[sta] Configure: calling ConnectDhcp (30s timeout)");
             success = WifiNetworkHelper.ConnectDhcp(ssid, password, WifiReconnectionKind.Automatic, true, token: cs.Token);
-            Debug.WriteLine($"[sta] Configure: ConnectDhcp result: {success}");
+            Log.Debug($"[sta] Configure: ConnectDhcp result: {success}");
 
             if (!success)
             {
                 wa.Disconnect();
                 // Bug in network helper, we've most likely try to connect before, let's make it manual
-                Debug.WriteLine("[sta] Configure: ConnectDhcp failed - retrying with manual wa.Connect");
+                Log.Debug("[sta] Configure: ConnectDhcp failed - retrying with manual wa.Connect");
                 var res = wa.Connect(ssid, WifiReconnectionKind.Automatic, password);
                 success = res.ConnectionStatus == WifiConnectionStatus.Success;
-                Console.WriteLine($"Connected: {res.ConnectionStatus}");
+                Log.Info($"Connected: {res.ConnectionStatus}");
             }
 
-            Debug.WriteLine($"[sta] Configure: final result={success}, free memory after={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug($"[sta] Configure: final result={success}, free memory after={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
             return success;
         }
 

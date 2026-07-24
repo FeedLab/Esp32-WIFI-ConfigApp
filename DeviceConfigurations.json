@@ -1,0 +1,65 @@
+﻿[
+  "Hc8",
+  {
+    "DeviceNames": [ "MH‑Z19", "MH‑Z19B", "MH‑Z19C", "MH‑Z19E" ],
+    "ClassName": "Hc8",
+    "AccessType": "UART",
+    "UART": {
+      "Port": "Com1",
+      "Parity": "None",
+      "BaudRate": 9600,
+      "StopBits": 1
+    },
+    "Sensors": [
+      {
+        "Name": "Co2",
+        "Unit": "ppm",
+        "EndPoint": "Readings/Co2"
+      }
+    ]
+  },
+  "SHT4x",
+  {
+    "DeviceNames": [ "SHT40", "SHT41" ],
+    "ClassName": "SHT4x",
+    "AccessType": "I2C",
+    "Sensors": [
+      {
+        "Name": "Temperature",
+        "Unit": "°C",
+        "EndPoint": "Readings/Temperature"
+      },
+      {
+        "Name": "Humidity",
+        "Unit": "%",
+        "EndPoint": "Readings/Humidity"
+      }
+    ]
+  },
+  "Bme280",
+  {
+    "DeviceNames": [ "BME280" ],
+    "ClassName": "Bme280",
+    "AccessType": "I2C",
+    "I2C": {
+      "Address": "0x76"
+    },
+    "Sensors": [
+      {
+        "Name": "Temperature",
+        "Unit": "°C",
+        "EndPoint": "Readings/Temperature"
+      },
+      {
+        "Name": "Humidity",
+        "Unit": "%",
+        "EndPoint": "Readings/Humidity"
+      },
+      {
+        "Name": "Pressure",
+        "Unit": "hPa",
+        "EndPoint": "Readings/Pressure"
+      }
+    ]
+  }
+]

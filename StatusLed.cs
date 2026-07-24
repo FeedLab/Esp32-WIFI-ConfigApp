@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
 using Iot.Device.Ws28xx.Esp32;
@@ -17,7 +16,7 @@ namespace WifiAP
 
         public static void Initialize()
         {
-            Debug.WriteLine($"[led] Initialize: pin={NeoPixelPin}, count={LedCount}");
+            Log.Debug($"[led] Initialize: pin={NeoPixelPin}, count={LedCount}");
             _pixels = new Ws2812b(NeoPixelPin, LedCount);
             ShowBooting();
         }
@@ -25,7 +24,7 @@ namespace WifiAP
         // LED 0 = WiFi Strength
         public static void ShowWifiStrength(int level)
         {
-            Debug.WriteLine($"[led] ShowWifiStrength: level={level}");
+            Log.Debug($"[led] ShowWifiStrength: level={level}");
 
             // Example: map strength to color
             Color c = level switch
@@ -43,14 +42,14 @@ namespace WifiAP
         // LED 1 = WiFi Mode
         public static void ShowWifiMode(bool apMode)
         {
-            Debug.WriteLine($"[led] ShowWifiMode: apMode={apMode}");
+            Log.Debug($"[led] ShowWifiMode: apMode={apMode}");
 
             StopBlinking();
 
             if (apMode)
             {
                 // Blink orange on LED 0
-                Debug.WriteLine("[led] ShowWifiMode: starting blink thread");
+                Log.Debug("[led] ShowWifiMode: starting blink thread");
                 _blinking = true;
                 _blinkThread = new Thread(() =>
                 {
@@ -62,7 +61,7 @@ namespace WifiAP
                         Thread.Sleep(BlinkIntervalMs);
                     }
 
-                    Debug.WriteLine("[led] blink thread exiting");
+                    Log.Debug("[led] blink thread exiting");
                 });
                 _blinkThread.Start();
             }
@@ -81,7 +80,7 @@ namespace WifiAP
         // on this device's tiny heap.
         public static void StopApBlinking()
         {
-            Debug.WriteLine("[led] StopApBlinking: client connected, holding solid");
+            Log.Debug("[led] StopApBlinking: client connected, holding solid");
             StopBlinking();
             SetColor(0, Color.DarkBlue);
         }
@@ -89,7 +88,7 @@ namespace WifiAP
         // LED 2 = Battery Level
         public static void ShowBatteryLevel(int percent)
         {
-            Debug.WriteLine($"[led] ShowBatteryLevel: percent={percent}");
+            Log.Debug($"[led] ShowBatteryLevel: percent={percent}");
 
             Color c = percent switch
             {
@@ -102,9 +101,31 @@ namespace WifiAP
             SetColor(2, c);
         }
 
+        // Boot-time fault signal: a configured piece of equipment failed to match/create/
+        // configure (see EquipmentLoader). Blocks the caller for the duration of the blink
+        // burst - acceptable since this only runs once, synchronously, during startup.
+        public static void ShowEquipmentError()
+        {
+            Log.Debug("[led] ShowEquipmentError: blinking all LEDs red");
+
+            const int blinks = 3;
+            for (int i = 0; i < blinks; i++)
+            {
+                SetColor(0, Color.Red);
+                SetColor(1, Color.Red);
+                SetColor(2, Color.Red);
+                Thread.Sleep(300);
+
+                SetColor(0, Color.Black);
+                SetColor(1, Color.Black);
+                SetColor(2, Color.Black);
+                Thread.Sleep(300);
+            }
+        }
+
         private static void ShowBooting()
         {
-            Debug.WriteLine("[led] ShowBooting: all LEDs red");
+            Log.Debug("[led] ShowBooting: all LEDs red");
 
             // Boot LED red
             SetColor(0, Color.Red);
@@ -124,7 +145,7 @@ namespace WifiAP
             // Join() throws InvalidOperationException (and would stall all event delivery even
             // if it didn't). The blink thread notices _blinking==false and exits on its own
             // within one BlinkIntervalMs tick.
-            Debug.WriteLine("[led] StopBlinking: signalling blink thread to stop");
+            Log.Debug("[led] StopBlinking: signalling blink thread to stop");
             _blinking = false;
             _blinkThread = null;
         }
@@ -132,7 +153,7 @@ namespace WifiAP
         private static void SetColor(int index, Color color)
         {
             // No per-call logging here: this is invoked every second, indefinitely, by the
-            // blink thread while in AP mode. A Debug.WriteLine with string interpolation on
+            // blink thread while in AP mode. A Log.Debug call with string concatenation on
             // every tick allocates on each call and will exhaust/fragment heap on this
             // memory-constrained device over time - log at the call sites instead.
             _pixels.Image.SetPixel(index, 0, color);

@@ -4,7 +4,6 @@
 //
 
 using System;
-using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using Iot.Device.DhcpServer;
@@ -28,9 +27,9 @@ namespace WifiAP
         private static string SoftAppIp { get; set; } = SoftApIpAddress;
 
         /// <summary>
-        /// The default SSID used for the Soft AP the first time it is ever configured. Once a
-        /// name has been persisted via <see cref="SetApName"/>, that value is used instead of
-        /// falling back to this default.
+        /// The SSID always used for the Soft AP, independent of any device name the user has
+        /// set via <see cref="SetDeviceName"/> - that name only affects how the device presents
+        /// itself as a station on the user's own router, not the Soft AP's own broadcast name.
         /// </summary>
         private const string DefaultApSsid = "Sensor-Setup";
 
@@ -44,7 +43,7 @@ namespace WifiAP
         /// </param>
         public static void SetWifiAp(bool forceReconfigure = false)
         {
-            Debug.WriteLine("[ap] SetWifiAp starting");
+            Log.Debug("[ap] SetWifiAp starting");
 
             // Scan now, before the AP's beacon comes up. Scanning uses the station radio, and
             // doing it after the AP is already broadcasting/accepting its first association
@@ -56,15 +55,15 @@ namespace WifiAP
             Wireless80211.Disable();
 
             bool configWritten = ConfigureAp(forceReconfigure);
-            Debug.WriteLine($"[ap] ConfigureAp wrote new config: {configWritten}");
+            Log.Debug($"[ap] ConfigureAp wrote new config: {configWritten}");
             if (configWritten)
             {
                 // A new configuration was written; reboot to activate the Access Point on restart.
-                Console.WriteLine("Setup Soft AP, Rebooting device");
+                Log.Info("Setup Soft AP, Rebooting device");
                 Power.RebootDevice();
             }
 
-            Debug.WriteLine($"[ap] starting DHCP server on {SoftAppIp}");
+            Log.Debug($"[ap] starting DHCP server on {SoftAppIp}");
             var dhcpserver = new DhcpServer
             {
                 CaptivePortalUrl = $"http://{SoftAppIp}",
@@ -77,17 +76,17 @@ namespace WifiAP
             var dhcpInitResult = dhcpserver.Start(IPAddress.Parse(SoftAppIp), new IPAddress(new byte[] { 255, 255, 255, 0 }));
             if (!dhcpInitResult)
             {
-                Console.WriteLine($@"Error initializing DHCP server.");
+                Log.Info($@"Error initializing DHCP server.");
                 // This happens after a very freshly flashed device
-                Debug.WriteLine("[ap] DHCP server failed to start - rebooting");
+                Log.Debug("[ap] DHCP server failed to start - rebooting");
                 Power.RebootDevice();
             }
 
-            Debug.WriteLine($"[ap] starting DNS captive-portal trap on {SoftAppIp}");
+            Log.Debug($"[ap] starting DNS captive-portal trap on {SoftAppIp}");
             DnsServer.Start(SoftAppIp);
 
-            Console.WriteLine($@"Running Soft AP, waiting for client to connect");
-            Console.WriteLine($@"Soft AP IP address :{GetIpAddress()}");
+            Log.Info($@"Running Soft AP, waiting for client to connect");
+            Log.Info($@"Soft AP IP address :{GetIpAddress()}");
         }
 
         /// <summary>
@@ -95,11 +94,11 @@ namespace WifiAP
         /// </summary>
         public static void Disable()
         {
-            Debug.WriteLine("[ap] Disable: turning off Soft AP for next boot");
+            Log.Debug("[ap] Disable: turning off Soft AP for next boot");
             WirelessAPConfiguration wirelessAPConfiguration = GetConfiguration();
             if (wirelessAPConfiguration == null)
             {
-                Debug.WriteLine("[ap] Disable: no WirelessAP configuration found, nothing to do");
+                Log.Debug("[ap] Disable: no WirelessAP configuration found, nothing to do");
                 return;
             }
 
@@ -122,15 +121,14 @@ namespace WifiAP
             if (ni == null || wapconf == null)
             {
                 // No Wireless AP interface is available on this device/firmware.
-                Debug.WriteLine("[ap] ConfigureAp: no WirelessAP interface found");
+                Log.Debug("[ap] ConfigureAp: no WirelessAP interface found");
                 throw new InvalidOperationException("No WirelessAP network interface was found.");
             }
 
-            // Keep whatever name the user has already chosen (see SetApName); only fall back to
-            // the default the very first time, when nothing has been configured yet.
-            string wantedSsid = string.IsNullOrEmpty(wapconf.Ssid) ? DefaultApSsid : wapconf.Ssid;
+            // The Soft AP always broadcasts the fixed default name - see DefaultApSsid.
+            string wantedSsid = DefaultApSsid;
 
-            Debug.WriteLine($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}, current SSID={wapconf.Ssid}, wanted SSID={wantedSsid}, forceReconfigure={forceReconfigure}");
+            Log.Debug($"[ap] ConfigureAp: current options={wapconf.Options}, current IP={ni.IPv4Address}, wanted IP={SoftAppIp}, current SSID={wapconf.Ssid}, wanted SSID={wantedSsid}, forceReconfigure={forceReconfigure}");
 
             // If already enabled with the expected IP and SSID, no configuration change is
             // needed - unless the caller explicitly wants a fresh configuration written
@@ -142,7 +140,7 @@ namespace WifiAP
                 ni.IPv4Address == SoftAppIp &&
                 wapconf.Ssid == wantedSsid)
             {
-                Debug.WriteLine("[ap] ConfigureAp: already configured, no changes needed");
+                Log.Debug("[ap] ConfigureAp: already configured, no changes needed");
                 return false;
             }
 
@@ -166,7 +164,11 @@ namespace WifiAP
 
             // To set-up Access point with no Authentication
             wapconf.Authentication = System.Net.NetworkInformation.AuthenticationType.Open;
-            wapconf.Password = "";
+
+            // Password is deliberately left untouched here - with Open authentication it is
+            // never used for the Soft AP itself, so this field is reused as persistent storage
+            // for the user's chosen device name (see SetDeviceName/GetDeviceName). Overwriting
+            // it here would erase that name every time the Soft AP is (re)configured.
 
             // To set up Access point with no Authentication. Password minimum 8 chars.
             //wapconf.Authentication = AuthenticationType.WPA2;
@@ -228,25 +230,26 @@ namespace WifiAP
         }
 
         /// <summary>
-        /// Gets the name currently configured for the Soft AP, falling back to the default if
-        /// none has been set yet.
+        /// Gets the user-chosen device name, or an empty string if none has been set yet.
+        /// This is not the Soft AP's own SSID (see <see cref="DefaultApSsid"/>) - it is the name
+        /// the device advertises when connecting as a station on the user's own router.
         /// </summary>
-        public static string GetApName()
+        public static string GetDeviceName()
         {
             WirelessAPConfiguration wapconf = GetConfiguration();
-            if (wapconf == null || string.IsNullOrEmpty(wapconf.Ssid))
+            if (wapconf == null)
             {
-                return DefaultApSsid;
+                return "";
             }
 
-            return wapconf.Ssid;
+            return wapconf.Password;
         }
 
         /// <summary>
-        /// Persists a new name for the Soft AP. Takes effect the next time Soft AP mode is
-        /// (re)configured - it does not rename an already-running AP.
+        /// Persists a new device name, used the next time the device connects as a station (see
+        /// <see cref="Wireless80211.Configure"/> and <see cref="Wireless80211.ConnectOrSetAp"/>).
         /// </summary>
-        public static void SetApName(string name)
+        public static void SetDeviceName(string name)
         {
             if (string.IsNullOrEmpty(name))
             {
@@ -259,15 +262,15 @@ namespace WifiAP
                 return;
             }
 
-            // WiFi SSIDs are capped at 32 bytes.
+            // Matches the setup page's maxlength and WifiAdapter.SetDeviceName's own limit.
             if (name.Length > 32)
             {
                 name = name.Substring(0, 32);
             }
 
-            wapconf.Ssid = name;
+            wapconf.Password = name;
             wapconf.SaveConfiguration();
-            Debug.WriteLine($"[ap] SetApName: persisted new Soft AP name '{name}'");
+            Log.Debug($"[ap] SetDeviceName: persisted new device name '{name}'");
         }
 
     }

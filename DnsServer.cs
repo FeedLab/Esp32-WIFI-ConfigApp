@@ -4,7 +4,6 @@
 //
 
 using System;
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -36,7 +35,7 @@ namespace WifiAP
         {
             if (_running)
             {
-                Debug.WriteLine("[dns] Start requested but already running");
+                Log.Debug("[dns] Start requested but already running");
                 return;
             }
 
@@ -49,7 +48,7 @@ namespace WifiAP
             _listenThread = new Thread(ListenLoop);
             _listenThread.Start();
 
-            Debug.WriteLine($"[dns] Start: listening on UDP :{DnsPort}, trapping all queries to {apIpAddress}");
+            Log.Debug($"[dns] Start: listening on UDP :{DnsPort}, trapping all queries to {apIpAddress}");
         }
 
         /// <summary>
@@ -64,7 +63,7 @@ namespace WifiAP
                 return;
             }
 
-            Debug.WriteLine("[dns] Stop requested");
+            Log.Debug("[dns] Stop requested");
             _running = false;
             _socket?.Close(); // unblocks the pending ReceiveFrom in the listen thread
             _socket = null;
@@ -89,7 +88,7 @@ namespace WifiAP
                     byte[] response = BuildResponse(buffer, received);
                     _socket.SendTo(response, response.Length, SocketFlags.None, remoteEndPoint);
 
-                    Debug.WriteLine($"[dns] answered query from {remoteEndPoint}, {received} bytes in");
+                    Log.Debug($"[dns] answered query from {remoteEndPoint}, {received} bytes in");
                 }
                 catch (Exception ex)
                 {
@@ -99,12 +98,12 @@ namespace WifiAP
                     // the Stop()-triggered exit and the loop condition ends things cleanly.
                     if (_running)
                     {
-                        Debug.WriteLine($"[dns] request handling failed: {ex.Message}");
+                        Log.Debug($"[dns] request handling failed: {ex.Message}");
                     }
                 }
             }
 
-            Debug.WriteLine("[dns] listen thread exiting");
+            Log.Debug("[dns] listen thread exiting");
         }
 
         /// <summary>

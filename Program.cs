@@ -5,7 +5,6 @@
 
 using System;
 using System.Device.Gpio;
-using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Threading;
@@ -38,8 +37,8 @@ namespace WifiAP
 
         public static void Main()
         {
-            Debug.WriteLine("Welcome to WiFI Soft AP world!");
-            Debug.WriteLine($"[boot] free memory: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug("Welcome to WiFI Soft AP world!");
+            Log.Debug($"[boot] free memory: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
             StatusLed.Initialize();
 
@@ -60,14 +59,14 @@ namespace WifiAP
 
                 if (args.ChangeType == PinEventTypes.Falling)
                 {
-                    Console.WriteLine("Button pressed!");
-                    Debug.WriteLine("[boot] setup button held - forcing Soft AP setup mode");
+                    Log.Info("Button pressed!");
+                    Log.Debug("[boot] setup button held - forcing Soft AP setup mode");
                     WirelessAP.SetWifiAp(forceReconfigure: true);
                     wifiApMode = true;
                 }
                 else if (args.ChangeType == PinEventTypes.Rising)
                 {
-                    Console.WriteLine("Button released!");
+                    Log.Info("Button released!");
                 }
             };
 
@@ -76,8 +75,8 @@ namespace WifiAP
             // occurs, so the check above alone would miss it - check the level directly too.
             if (setupButton.Read() == PinValue.Low)
             {
-                Console.WriteLine("Button held at boot!");
-                Debug.WriteLine("[boot] setup button already held at boot - entering Soft AP setup mode");
+                Log.Info("Button held at boot!");
+                Log.Debug("[boot] setup button already held at boot - entering Soft AP setup mode");
 
                 // Don't force a reconfigure/reboot here: we just booted, so a fresh AP is not
                 // needed. If the AP is already configured with the wanted settings, this brings
@@ -89,12 +88,12 @@ namespace WifiAP
             }
             else
             {
-                Debug.WriteLine("[boot] Attempting station connect (or Soft AP fallback)");
+                Log.Debug("[boot] Attempting station connect (or Soft AP fallback)");
                 wifiApMode = Wireless80211.ConnectOrSetAp();
             }
 
-            Debug.WriteLine($"[boot] resulting mode: {(wifiApMode ? "AccessPoint" : "Station")}");
-            Console.WriteLine($"Connected with wifi credentials. IP Address: {(wifiApMode ? WirelessAP.GetIpAddress() : Wireless80211.GetCurrentIPAddress())}");
+            Log.Debug($"[boot] resulting mode: {(wifiApMode ? "AccessPoint" : "Station")}");
+            Log.Info($"Connected with wifi credentials. IP Address: {(wifiApMode ? WirelessAP.GetIpAddress() : Wireless80211.GetCurrentIPAddress())}");
 
             if (wifiApMode)
             {
@@ -105,7 +104,7 @@ namespace WifiAP
                 // that used to run as part of this start-up has been moved earlier, into
                 // WirelessAP.SetWifiAp, before the AP's beacon comes up at all - see the
                 // comment there for why running it concurrently with the beacon was risky.
-                Debug.WriteLine("[boot] AP mode - deferring web server until a station connects");
+                Log.Debug("[boot] AP mode - deferring web server until a station connects");
                 NetworkChange.NetworkAPStationChanged += NetworkChange_NetworkAPStationChanged;
             }
             else
@@ -113,10 +112,13 @@ namespace WifiAP
                 StatusLed.ShowWifiMode(false);
 
                 // Already a connected station - safe to start the read-only /info endpoint now.
-                Debug.WriteLine("[boot] starting web server");
+                Log.Debug("[boot] starting web server");
                 server.Start(false);
+
+                Log.Debug("[boot] loading configured equipment");
+                EquipmentLoader.LoadAndConfigure();
             }
-            Debug.WriteLine($"[boot] free memory after start-up: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug($"[boot] free memory after start-up: {nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
             // Just wait for now
             // Here you would have the reset of your program using the client WiFI link
@@ -130,7 +132,7 @@ namespace WifiAP
         /// <param name="e">Event argument</param>
         private static void NetworkChange_NetworkAPStationChanged(int NetworkIndex, NetworkAPStationEventArgs e)
         {
-            Debug.WriteLine($"[ap-event] NetworkAPStationChanged Index:{NetworkIndex} Connected:{e.IsConnected} Station:{e.StationIndex} connectedCount:{connectedCount}");
+            Log.Debug($"[ap-event] NetworkAPStationChanged Index:{NetworkIndex} Connected:{e.IsConnected} Station:{e.StationIndex} connectedCount:{connectedCount}");
 
             // if connected then get information on the connecting station
             if (e.IsConnected)
@@ -139,7 +141,7 @@ namespace WifiAP
                 WirelessAPStation station = wapconf.GetConnectedStations(e.StationIndex);
 
                 string macString = BitConverter.ToString(station.MacAddress);
-                Debug.WriteLine($"[ap-event] Station mac {macString} Rssi:{station.Rssi} PhyMode:{station.PhyModes} ");
+                Log.Debug($"[ap-event] Station mac {macString} Rssi:{station.Rssi} PhyMode:{station.PhyModes} ");
 
                 connectedCount++;
 
@@ -154,7 +156,7 @@ namespace WifiAP
 
                     // Wait for Station to be fully connected before starting web server
                     // other you will get a Network error
-                    Debug.WriteLine("[ap-event] first station connected - starting web server after settle delay");
+                    Log.Debug("[ap-event] first station connected - starting web server after settle delay");
                     Thread.Sleep(2000);
                     server.Start(true);
                 }
@@ -167,7 +169,7 @@ namespace WifiAP
                     connectedCount--;
                     if (connectedCount == 0)
                     {
-                        Debug.WriteLine("[ap-event] last station disconnected - stopping web server");
+                        Log.Debug("[ap-event] last station disconnected - stopping web server");
                         server.Stop();
                     }
                 }

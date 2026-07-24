@@ -3,14 +3,14 @@
 // See LICENSE file in the project root for full license information.
 //
 
+using nanoFramework.Json;
+using nanoFramework.Runtime.Native;
 using System;
 using System.Collections;
-using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
-using nanoFramework.Runtime.Native;
 
 namespace WifiAP
 {
@@ -25,6 +25,13 @@ namespace WifiAP
         // Networks discovered by the WiFi scan performed before the Soft AP comes up (see
         // WirelessAP.SetWifiAp) - populated via SetAvailableNetworks, not scanned here.
         private static Wireless80211.ScannedNetwork[] _availableNetworks;
+
+        // Outcome of the most recent /save attempt ("", "pending", "success" or "failed"),
+        // polled from the confirmation page via /connect-status. Needed because the actual
+        // station-connect attempt only happens after the response for /save has already been
+        // sent (see the comment in ProcessRequest) - the browser has no other way to learn
+        // whether the password it submitted actually worked.
+        private static string _connectStatus = "";
 
         /// <summary>
         /// Supplies the network list to offer on the setup page. Called once, before the Soft
@@ -46,7 +53,7 @@ namespace WifiAP
         /// </param>
         public void Start(bool apMode)
         {
-            Debug.WriteLine($"[web] Start requested, apMode={apMode}, already running={listener != null}");
+            Log.Debug($"[web] Start requested, apMode={apMode}, already running={listener != null}");
             if (listener == null)
             {
                 _apMode = apMode;
@@ -58,14 +65,14 @@ namespace WifiAP
 
         public void Stop()
         {
-            Debug.WriteLine("[web] Stop requested");
+            Log.Debug("[web] Stop requested");
             if (listener != null)
                 listener.Stop();
         }
         private void RunServer()
         {
             listener.Start();
-            Debug.WriteLine($"[web] listener started, apMode={_apMode}, free memory={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug($"[web] listener started, apMode={_apMode}, free memory={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
             while (listener.IsListening)
             {
@@ -78,11 +85,11 @@ namespace WifiAP
                 catch (Exception ex)
                 {
                     // Never let a single bad request tear down the listener thread.
-                    Debug.WriteLine($"Request processing failed: {ex.Message}");
+                    Log.Debug($"Request processing failed: {ex.Message}");
                 }
             }
             listener.Close();
-            Debug.WriteLine("[web] listener closed");
+            Log.Debug("[web] listener closed");
 
             listener = null;
         }
@@ -95,13 +102,26 @@ namespace WifiAP
             string password = null;
             bool isApSet = false;
 
-            Debug.WriteLine($"[web] request: {request.HttpMethod} {request.RawUrl}, free memory={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
+            Log.Debug($"[web] request: {request.HttpMethod} {request.RawUrl}, free memory={nanoFramework.Runtime.Native.GC.Run(false)} bytes");
 
-            if (request.HttpMethod == "POST")
+            if (string.IsNullOrEmpty(request.RawUrl))
             {
-                // The scan results are no longer needed once the form is submitted; drop them
-                // now to free memory before parsing/responding on this very constrained device.
-                _availableNetworks = null;
+                // A malformed/aborted request (e.g. a client that disconnected before sending a
+                // full request line) parses with a null RawUrl. Nothing to serve - drop it
+                // quietly rather than throwing.
+                Log.Debug("[web] request had no RawUrl - dropping");
+                return;
+            }
+
+            string path = request.RawUrl.Split('?')[0];
+
+            if (request.HttpMethod == "POST" && path == "/save")
+            {
+                // Deliberately NOT clearing _availableNetworks here (it used to be dropped
+                // eagerly to save memory before parsing/responding). If the connect attempt
+                // below fails, the user is sent back to the setup page and needs this same list
+                // to render again - a fresh scan can't be done then without knocking down the
+                // already-running Soft AP beacon (see the comment in WirelessAP.SetWifiAp).
 
                 // Form submission (sent as POST so the password is not exposed in the URL).
                 // Pick the manually typed SSID (hidden networks) if given, otherwise the one
@@ -118,41 +138,47 @@ namespace WifiAP
 
                 ssid = string.IsNullOrEmpty(manual) ? selected : manual;
 
-                // Persist the Soft AP name now, regardless of whether the station join below
-                // succeeds - it only takes effect the next time Soft AP mode is (re)entered, so
-                // there is no live-AP-rename risk here.
-                string apName = UrlDecode((string)pars["apName"]);
-                if (!string.IsNullOrEmpty(apName))
+                // Persist the device name now, regardless of whether the station join below
+                // succeeds - it only takes effect the next time the device connects as a
+                // station, so there is no risk of disrupting the current Soft AP session here.
+                string deviceName = UrlDecode((string)pars["deviceName"]);
+                if (!string.IsNullOrEmpty(deviceName))
                 {
-                    WirelessAP.SetApName(apName);
+                    WirelessAP.SetDeviceName(deviceName);
                 }
 
-                Debug.WriteLine($"Wireless parameters SSID:{ssid} PASSWORD:{password} APNAME:{apName}");
+                Log.Debug($"Wireless parameters SSID:{ssid} PASSWORD:{password} DEVICENAME:{deviceName}");
 
                 // Send the confirmation page now, while the Soft AP link to this client is
                 // still up. Joining the new network (below, after the response is sent) takes
                 // over the device's single WiFi radio and drops the Soft AP almost immediately -
                 // if we tried to connect before responding, the client's connection would be
-                // cut before the response could be delivered ("can't reach this page").
+                // cut before the response could be delivered ("can't reach this page"). The
+                // confirmation page polls /connect-status instead, to learn the real outcome.
                 response.ContentType = "text/html";
-                OutPutResponse(response, CreateResultPage(
-                    "<p>Settings saved. Attempting to connect and reboot the device.</p>" +
-                    "<p>If it doesn't rejoin this setup network, check the SSID/password and try again.</p>"));
+                if (string.IsNullOrEmpty(ssid))
+                {
+                    OutPutResponse(response, CreateResultPage(
+                        "<p>No network selected. <a href='/'>Go back</a> and choose one.</p>"));
+                }
+                else
+                {
+                    _connectStatus = "pending";
+                    OutPutResponse(response, CreateConnectingPage());
+                }
                 isApSet = true;
+            }
+            else if (request.HttpMethod == "POST")
+            {
+                // Not our setup form (e.g. a stray background request from the client's OS) -
+                // nothing to do. Answering plainly avoids misparsing an unrelated POST body as
+                // a WiFi-credentials submission.
+                Log.Debug($"[web] ignoring POST to {path} - not the setup form");
+                response.StatusCode = (int)HttpStatusCode.NotFound;
+                response.ContentLength64 = 0;
             }
             else
             {
-                if (string.IsNullOrEmpty(request.RawUrl))
-                {
-                    // A malformed/aborted request (e.g. a client that disconnected before
-                    // sending a full request line) parses with a null RawUrl. Nothing to
-                    // serve - drop it quietly rather than throwing.
-                    Debug.WriteLine("[web] request had no RawUrl - dropping");
-                    return;
-                }
-
-                string path = request.RawUrl.Split('?')[0];
-
                 if (path == "/favicon.ico")
                 {
                     // The bundled favicon is a ~10 KB image and loading it reliably throws
@@ -168,6 +194,31 @@ namespace WifiAP
                     response.ContentType = "text/html";
                     OutPutResponse(response, CreateInfoPage());
                 }
+                else if (path == "/connect-status")
+                {
+                    // Polled by the confirmation page shown after /save - see _connectStatus.
+                    response.ContentType = "text/plain";
+                    OutPutResponse(response, string.IsNullOrEmpty(_connectStatus) ? "none" : _connectStatus);
+                }
+                else if (EquipmentLoader.EndpointsByPath.Contains(path))
+                {
+                    // A sensor reading route registered by EquipmentLoader (e.g. /Readings/Co2).
+                    // Only ever populated in station mode - EquipmentLoader.LoadAndConfigure is
+                    // not called while in Soft AP setup mode - so this is a no-op lookup there.
+                    var endpoint = (SensorEndpoint)EquipmentLoader.EndpointsByPath[path];
+                    double value = endpoint.Device.ReadSensor(endpoint.SensorName);
+                    response.ContentType = "application/json";
+
+                    var reading = new SensorOutput
+                    {
+                        Value = value,
+                        Timestamp = DateTime.UtcNow.ToString()
+                    };
+
+                    string json = nanoFramework.Json.JsonSerializer.SerializeObject(reading);
+
+                    OutPutResponse(response, json);
+                }
                 else if (_apMode)
                 {
                     if (IsCaptivePortalProbe(request))
@@ -179,6 +230,9 @@ namespace WifiAP
                     }
                     else
                     {
+                        // A fresh visit to the setup page - clear any previous attempt's result
+                        // so a retry doesn't briefly flash a stale success/failure state.
+                        _connectStatus = "";
                         response.ContentType = "text/html";
                         OutPutResponse(response, CreateSetupPage());
                     }
@@ -192,7 +246,7 @@ namespace WifiAP
             }
 
             response.Close();
-            Debug.WriteLine("[web] response closed");
+            Log.Debug("[web] response closed");
 
             if (isApSet && !string.IsNullOrEmpty(ssid))
             {
@@ -203,16 +257,18 @@ namespace WifiAP
                 // Now attempt the station connection and reboot into normal mode. Any
                 // Soft AP client (including the one that just submitted this form) will
                 // lose its connection to the device at this point - that is expected.
-                Debug.WriteLine($"[web] connecting to '{ssid}' as station before reboot");
+                Log.Debug($"[web] connecting to '{ssid}' as station before reboot");
                 bool connected = Wireless80211.Configure(ssid, password);
-                Debug.WriteLine($"[web] station connect result: {connected}");
+                Log.Debug($"[web] station connect result: {connected}");
 
                 if (connected)
                 {
                     // Station join succeeded - reboot into normal mode so the device
-                    // comes up cleanly on the new network.
+                    // comes up cleanly on the new network. The confirmation page's poll
+                    // request(s) will simply stop getting answered once the Soft AP drops.
+                    _connectStatus = "success";
                     WirelessAP.Disable();
-                    Debug.WriteLine("[web] rebooting into normal mode");
+                    Log.Debug("[web] rebooting into normal mode");
                     Thread.Sleep(200);
                     Power.RebootDevice();
                 }
@@ -220,7 +276,8 @@ namespace WifiAP
                 {
                     // Station join failed (e.g. wrong password) - keep the Soft AP running
                     // instead of rebooting into a station boot that's doomed to fail too.
-                    Debug.WriteLine("[web] station connect failed - staying in Soft AP setup mode");
+                    _connectStatus = "failed";
+                    Log.Debug("[web] station connect failed - staying in Soft AP setup mode");
                 }
             }
         }
@@ -262,13 +319,25 @@ namespace WifiAP
                    "<label>Network</label>" +
                    "<div class='nets'>" + networkList + "</div>" +
                    "<label>Or enter SSID (hidden networks)</label>" +
-                   "<input name='ssidManual' placeholder='optional'>" +
+                   "<input name='ssidManual' id='ssidManual' placeholder='optional'>" +
                    "<label>Password</label>" +
                    "<input name='password' type='password'>" +
-                   "<label>Access Point Name</label>" +
-                   "<input name='apName' value='" + HtmlEncode(WirelessAP.GetApName()) + "' maxlength='32'>" +
-                   "<button type='submit'>Connect</button>" +
-                   "</form></div></body></html>";
+                   "<label>Device Name (shown in your router)</label>" +
+                   "<input name='deviceName' value='" + HtmlEncode(WirelessAP.GetDeviceName()) + "' maxlength='32'>" +
+                   "<button type='submit' id='connectBtn' disabled>Connect</button>" +
+                   "</form>" +
+                   "<script>" +
+                   "function updateBtn(){" +
+                   "var manual=document.getElementById('ssidManual').value.trim();" +
+                   "var checked=document.querySelector(\"input[name='ssid']:checked\");" +
+                   "var hasSsid=manual.length>0||(checked&&checked.value.length>0);" +
+                   "document.getElementById('connectBtn').disabled=!hasSsid;" +
+                   "}" +
+                   "document.addEventListener('input',updateBtn);" +
+                   "document.addEventListener('change',updateBtn);" +
+                   "updateBtn();" +
+                   "</script>" +
+                   "</div></body></html>";
         }
 
         /// <summary>
@@ -337,7 +406,7 @@ namespace WifiAP
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Could not read WiFi configuration: {ex.Message}");
+                Log.Debug($"Could not read WiFi configuration: {ex.Message}");
             }
 
             // GC.Run returns the free memory in bytes after collection.
@@ -411,6 +480,36 @@ namespace WifiAP
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Confirmation page shown right after /save. Polls /connect-status to learn whether
+        /// the station connect attempt (which only happens after this response is sent) has
+        /// succeeded or failed, and updates itself accordingly - see the comment in
+        /// ProcessRequest for why the actual result can't just be part of this response.
+        /// </summary>
+        static string CreateConnectingPage()
+        {
+            return CreateResultPage(
+                "<div id='msg'><p>Settings saved. Attempting to connect...</p></div>" +
+                "<script>" +
+                "var tries=0;" +
+                "function poll(){" +
+                "fetch('/connect-status').then(function(r){return r.text();}).then(function(t){" +
+                "if(t=='failed'){" +
+                "document.getElementById('msg').innerHTML=" +
+                "\"<p>Could not connect - check the password and try again.</p><p><a href='/'>Back to setup</a></p>\";" +
+                "return;" +
+                "}" +
+                "if(t=='success'){" +
+                "document.getElementById('msg').innerHTML='<p>Connected! You can close this page.</p>';" +
+                "return;" +
+                "}" +
+                "tries++;if(tries<20){setTimeout(poll,1500);}" +
+                "}).catch(function(){tries++;if(tries<20){setTimeout(poll,1500);}});" +
+                "}" +
+                "setTimeout(poll,1500);" +
+                "</script>");
         }
 
         /// <summary>
@@ -494,7 +593,7 @@ namespace WifiAP
             long contentLength = request.ContentLength64;
             if (contentLength <= 0 || contentLength > MaxFormBodyBytes)
             {
-                Debug.WriteLine($"Rejecting POST body of {contentLength} bytes");
+                Log.Debug($"Rejecting POST body of {contentLength} bytes");
                 return new Hashtable();
             }
 
@@ -614,4 +713,12 @@ namespace WifiAP
             return sb.ToString();
         }
     }
+
+
+    public class SensorOutput
+    {
+        public double Value { get; set; }
+        public string Timestamp { get; set; }
+    }
+
 }
